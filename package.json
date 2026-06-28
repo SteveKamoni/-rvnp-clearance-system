@@ -1,0 +1,26 @@
+{
+  "name": "-rvnp-clearance-system",
+  "version": "1.0.0",
+  "description": "A Web Based Clearance System for student",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+      "client": "cd client && npm run dev",
+        "server": "cd server && npm run dev",
+          "dev": "concurrently \"npm run server\" \"npm run client\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SteveKamoni/-rvnp-clearance-system.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/SteveKamoni/-rvnp-clearance-system/issues"
+  },
+  "homepage": "https://github.com/SteveKamoni/-rvnp-clearance-system#readme",
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
