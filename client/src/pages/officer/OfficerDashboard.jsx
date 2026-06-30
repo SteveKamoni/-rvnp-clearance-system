@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import {
   Search,
   Users,
@@ -7,6 +7,8 @@ import {
   AlertTriangle,
   X,
   Loader2,
+  Bell,
+  MessageCircle
 } from "lucide-react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +32,15 @@ const OfficerDashboard = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+
+  // Notifications State & Refs
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notificationsRef = useRef(null);
+
+  const [dismissedIds, setDismissedIds] = useState(() => {
+    const saved = localStorage.getItem("dismissedNotifications");
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const fetchQueue = async () => {
     const token = localStorage.getItem("token");
@@ -99,6 +110,88 @@ const OfficerDashboard = () => {
     return () => clearInterval(interval);
   }, []);
 
+  // Derive notifications from queue array
+  const notifications = useMemo(() => {
+    const list = [];
+    const deptName = user?.department;
+    if (!deptName) return list;
+
+    queue.forEach((clearance) => {
+      const dept = clearance.departments?.find((d) => d.name === deptName);
+      if (dept && dept.status === "requested") {
+        const studentId = clearance.student?._id || clearance.student || "";
+        const sno = dept.sno;
+        const requestedAt = dept.requestedAt || "";
+        const id = `${studentId}-${sno}-requested-${requestedAt}`;
+
+        if (dept.studentResponse && dept.studentResponse.trim()) {
+          list.push({
+            id,
+            type: "response",
+            message: `${clearance.student?.fullName || "A student"} responded to your decision`,
+            studentName: clearance.student?.fullName || "",
+            clearance,
+          });
+        } else {
+          list.push({
+            id,
+            type: "request",
+            message: `${clearance.student?.fullName || "A student"} requested clearance`,
+            studentName: clearance.student?.fullName || "",
+            clearance,
+          });
+        }
+      }
+    });
+    return list;
+  }, [queue, user?.department]);
+
+  // Filter notifications to only show ones NOT in dismissedIds
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter((n) => !dismissedIds.includes(n.id));
+  }, [notifications, dismissedIds]);
+
+  const dismissNotification = (id) => {
+    const updated = [...dismissedIds, id];
+    setDismissedIds(updated);
+    localStorage.setItem("dismissedNotifications", JSON.stringify(updated));
+  };
+
+  const clearAllNotifications = () => {
+    const visibleIds = visibleNotifications.map((n) => n.id);
+    const updated = [...dismissedIds, ...visibleIds];
+    setDismissedIds(updated);
+    localStorage.setItem("dismissedNotifications", JSON.stringify(updated));
+  };
+
+  // Clean up stale dismissedIds
+  useEffect(() => {
+    const currentIds = notifications.map((n) => n.id);
+    const cleaned = dismissedIds.filter((id) => currentIds.includes(id));
+    if (cleaned.length !== dismissedIds.length) {
+      setDismissedIds(cleaned);
+      localStorage.setItem("dismissedNotifications", JSON.stringify(cleaned));
+    }
+  }, [notifications]);
+
+  // Click outside to close notifications dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        notificationsRef.current &&
+        !notificationsRef.current.contains(event.target)
+      ) {
+        setShowNotifications(false);
+      }
+    };
+    if (showNotifications) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showNotifications]);
+
   const handleOfficerAction = async (studentId, sno) => {
     if (
       (activeAction === "rejected" || activeAction === "summoned") &&
@@ -135,6 +228,13 @@ const OfficerDashboard = () => {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleViewNotification = (id, studentName) => {
+    dismissNotification(id);
+    setActiveTab("queue");
+    setSearchTerm(studentName);
+    setShowNotifications(false);
   };
 
   const handleLogout = () => {
@@ -278,7 +378,7 @@ const OfficerDashboard = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-12">
-      {/* 1. NAVBAR */}
+      {/* 1. NAVBAR WITH NOTIFICATION BELL AND DROPDOWN */}
       <nav className="bg-[#0D1B3E] text-white px-6 py-4 shadow-md">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -298,6 +398,89 @@ const OfficerDashboard = () => {
             <span className="text-sm font-medium text-gray-200">
               {user?.fullName || "Officer Name"}
             </span>
+
+            {/* Notification Bell */}
+            <div className="relative" ref={notificationsRef}>
+              <button
+                type="button"
+                onClick={() => setShowNotifications(!showNotifications)}
+                aria-label="Notifications"
+                className="relative rounded-full p-2 transition hover:bg-[#173067]"
+              >
+                <Bell size={22} className="text-white" />
+
+                {/* Dot badge with count */}
+                {visibleNotifications.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold border-2 border-[#0D1B3E]">
+                    {visibleNotifications.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown Panel */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 rounded-xl bg-white text-slate-900 shadow-2xl border border-slate-100 py-2 z-50">
+                  <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                    <span className="font-bold text-sm text-[#0D1B3E]">Notifications</span>
+                    {visibleNotifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllNotifications}
+                        className="text-xs font-bold text-[#C9A84C] hover:text-[#0D1B3E] transition"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {visibleNotifications.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-slate-400">
+                        No new notifications
+                      </div>
+                    ) : (
+                      visibleNotifications.map((n, idx) => (
+                        <div
+                          key={idx}
+                          className="flex gap-3 px-4 py-3 hover:bg-slate-50 transition border-l-4 border-l-blue-500 relative group"
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {n.type === "response" ? (
+                              <MessageCircle size={16} className="text-[#0D1B3E]" />
+                            ) : (
+                              <CheckCircle2 size={16} className="text-blue-500" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 pr-6">
+                            <p className="text-xs text-slate-700 leading-normal break-words">
+                              {n.message}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleViewNotification(n.id, n.studentName)}
+                              className="mt-2 text-[10px] font-bold text-[#C9A84C] hover:text-[#0D1B3E] uppercase tracking-wider block text-left"
+                            >
+                              View
+                            </button>
+                          </div>
+                          {/* Dismiss Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dismissNotification(n.id);
+                            }}
+                            className="absolute right-2 top-3 text-slate-400 hover:text-slate-600 p-1 rounded transition"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
             <button
               onClick={handleLogout}
               className="px-3.5 py-1.5 border border-[#C9A84C] text-[#C9A84C] hover:bg-[#C9A84C] hover:text-[#0D1B3E] transition rounded-lg text-sm font-semibold"

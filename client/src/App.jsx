@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/auth/LoginPage";
 import StudentDashboard from "./pages/student/StudentDashboard";
 import OfficerDashboard from "./pages/officer/OfficerDashboard";
-import AdminDashboard from "./pages/admin/AdminDasboard";
+import AdminDashboard from "./pages/admin/AdminDashboard";
 
 const ProtectedRoute = ({ children }) => {
   const token = localStorage.getItem("token");

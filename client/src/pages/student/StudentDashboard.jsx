@@ -1,5 +1,6 @@
 // client/src/pages/student/StudentDashboard.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import {
   AlertTriangle,
@@ -11,15 +12,20 @@ import {
   MessageSquareText,
   SendHorizonal,
   XCircle,
+  Bell,
+  LogOut,
+  X
 } from "lucide-react";
 
-import Navbar from "../../components/layout/Navbar";
+import useAuthStore from "../../store/authStore";
 import TabNav from "../../components/layout/TabNav";
-
 import StudentInfoCard from "./StudentInfoCard";
 import SummaryStats from "./SummaryStats";
 
 const StudentDashboard = () => {
+  const navigate = useNavigate();
+  const { logout } = useAuthStore();
+
   const [activeTab, setActiveTab] = useState("overview");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,6 +49,15 @@ const StudentDashboard = () => {
   });
 
   const [departments, setDepartments] = useState([]);
+
+  // Notifications State & Refs
+  const [showNotifications, setShowNotifications] = useState(false);
+  const notificationsRef = useRef(null);
+
+  const [dismissedIds, setDismissedIds] = useState(() => {
+    const saved = localStorage.getItem("dismissedNotifications");
+    return saved ? JSON.parse(saved) : [];
+  });
 
   const loadClearance = async (showLoading = true) => {
     try {
@@ -125,6 +140,88 @@ const StudentDashboard = () => {
     [student, clearancePercentage, cleared, pending, requested, rejected, summoned]
   );
 
+  // Derive notifications from departments array
+  const notifications = useMemo(() => {
+    const list = [];
+    departments.forEach((dept) => {
+      // 1. Rejected or summoned AND studentResponse is empty
+      if (
+        (dept.status === "rejected" || dept.status === "summoned") &&
+        (!dept.studentResponse || !dept.studentResponse.trim())
+      ) {
+        const reason = dept.officerReason || "";
+        const id = `${dept.sno}-${dept.status}-${reason}`;
+        list.push({
+          id,
+          type: "action_needed",
+          message: `${dept.name}: ${reason || "No explanation provided."}`,
+          sno: dept.sno,
+        });
+      }
+      // 2. Cleared AND clearedAt is within the last 24 hours
+      if (dept.status === "cleared" && dept.clearedAt) {
+        const clearedTime = new Date(dept.clearedAt).getTime();
+        const now = new Date().getTime();
+        if (now - clearedTime <= 24 * 60 * 60 * 1000) {
+          const id = `${dept.sno}-${dept.status}-${dept.clearedAt}`;
+          list.push({
+            id,
+            type: "cleared",
+            message: `${dept.name} has cleared you`,
+            sno: dept.sno,
+          });
+        }
+      }
+    });
+    return list;
+  }, [departments]);
+
+  // Filter notifications to only show ones NOT in dismissedIds
+  const visibleNotifications = useMemo(() => {
+    return notifications.filter((n) => !dismissedIds.includes(n.id));
+  }, [notifications, dismissedIds]);
+
+  const dismissNotification = (id) => {
+    const updated = [...dismissedIds, id];
+    setDismissedIds(updated);
+    localStorage.setItem("dismissedNotifications", JSON.stringify(updated));
+  };
+
+  const clearAllNotifications = () => {
+    const visibleIds = visibleNotifications.map((n) => n.id);
+    const updated = [...dismissedIds, ...visibleIds];
+    setDismissedIds(updated);
+    localStorage.setItem("dismissedNotifications", JSON.stringify(updated));
+  };
+
+  // Clean up stale dismissedIds
+  useEffect(() => {
+    const currentIds = notifications.map((n) => n.id);
+    const cleaned = dismissedIds.filter((id) => currentIds.includes(id));
+    if (cleaned.length !== dismissedIds.length) {
+      setDismissedIds(cleaned);
+      localStorage.setItem("dismissedNotifications", JSON.stringify(cleaned));
+    }
+  }, [notifications]);
+
+  // Click outside to close notifications dropdown
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (
+        notificationsRef.current &&
+        !notificationsRef.current.contains(event.target)
+      ) {
+        setShowNotifications(false);
+      }
+    };
+    if (showNotifications) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showNotifications]);
+
   const handleInputChange = (e) => {
     const { name, value } = e.target;
 
@@ -197,6 +294,18 @@ const StudentDashboard = () => {
     } finally {
       setProcessingDepartment(null);
     }
+  };
+
+  const handleViewNotification = (id, sno) => {
+    dismissNotification(id);
+    setActiveTab("departments");
+    setShowNotifications(false);
+  };
+
+  const handleLogout = () => {
+    logout();
+    localStorage.clear();
+    navigate("/", { replace: true });
   };
 
   const renderStatusCard = (department) => {
@@ -379,7 +488,127 @@ const StudentDashboard = () => {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <Navbar />
+      {/* INLINE NAVBAR WITH NOTIFICATION DROPDOWN */}
+      <header className="w-full bg-[#0D1B3E] text-white shadow-lg">
+        <div className="mx-auto flex h-20 items-center justify-between px-4 sm:px-6 lg:px-8">
+          {/* Brand */}
+          <div className="flex items-center gap-4">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#102552] border-2 border-[#C9A84C] shadow-md">
+              <span className="text-lg font-bold tracking-wide text-[#C9A84C]">
+                RV
+              </span>
+            </div>
+
+            <div>
+              <h1 className="text-lg font-semibold leading-tight">
+                Clearance Portal
+              </h1>
+
+              <p className="text-sm text-slate-300">
+                Rift Valley National Polytechnic
+              </p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3">
+            <div className="relative" ref={notificationsRef}>
+              <button
+                type="button"
+                onClick={() => setShowNotifications(!showNotifications)}
+                aria-label="Notifications"
+                className="relative rounded-full p-2 transition hover:bg-[#173067]"
+              >
+                <Bell size={22} />
+
+                {/* Notification Indicator dot badge with count */}
+                {visibleNotifications.length > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold border-2 border-[#0D1B3E]">
+                    {visibleNotifications.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Dropdown panel */}
+              {showNotifications && (
+                <div className="absolute right-0 mt-2 w-80 rounded-xl bg-white text-slate-900 shadow-2xl border border-slate-100 py-2 z-50">
+                  <div className="px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                    <span className="font-bold text-sm text-[#0D1B3E]">Notifications</span>
+                    {visibleNotifications.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearAllNotifications}
+                        className="text-xs font-bold text-[#C9A84C] hover:text-[#0D1B3E] transition"
+                      >
+                        Clear all
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {visibleNotifications.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-slate-400">
+                        No new notifications
+                      </div>
+                    ) : (
+                      visibleNotifications.map((n, idx) => (
+                        <div
+                          key={idx}
+                          className={`flex gap-3 px-4 py-3 hover:bg-slate-50 transition border-l-4 relative group ${
+                            n.type === "action_needed"
+                              ? "border-l-red-500"
+                              : "border-l-green-500"
+                          }`}
+                        >
+                          <div className="mt-0.5 shrink-0">
+                            {n.type === "action_needed" ? (
+                              <AlertTriangle size={16} className="text-red-500" />
+                            ) : (
+                              <CheckCircle2 size={16} className="text-green-500" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0 pr-6">
+                            <p className="text-xs text-slate-700 leading-normal break-words">
+                              {n.message}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => handleViewNotification(n.id, n.sno)}
+                              className="mt-2 text-[10px] font-bold text-[#C9A84C] hover:text-[#0D1B3E] uppercase tracking-wider block text-left"
+                            >
+                              View
+                            </button>
+                          </div>
+                          {/* Dismiss Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              dismissNotification(n.id);
+                            }}
+                            className="absolute right-2 top-3 text-slate-400 hover:text-slate-600 p-1 rounded transition"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="flex items-center gap-2 rounded-lg border border-[#C9A84C] px-4 py-2 font-medium text-[#C9A84C] transition hover:bg-[#C9A84C] hover:text-[#0D1B3E]"
+            >
+              <LogOut size={18} />
+              <span>Sign Out</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
       <TabNav activeTab={activeTab} onTabChange={setActiveTab} />
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">

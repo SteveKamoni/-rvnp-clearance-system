@@ -539,6 +539,194 @@ const getOfficerHistory = async (req, res) => {
 
 /**
  * ==================================================
+ * Admin Functions
+ * ==================================================
+ */
+
+const adminOverride = async (req, res) => {
+  try {
+    const { studentId, sno } = req.params;
+    const { reason } = req.body;
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Reason is required.",
+      });
+    }
+
+    const clearance = await Clearance.findOne({ student: studentId });
+
+    if (!clearance) {
+      return res.status(404).json({
+        success: false,
+        message: "Clearance record not found.",
+      });
+    }
+
+    const departmentIndex = clearance.departments.findIndex(
+      (dept) => dept.sno === Number(sno)
+    );
+
+    if (departmentIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Department not found.",
+      });
+    }
+
+    const department = clearance.departments[departmentIndex];
+
+    if (department.status !== "rejected" && department.status !== "summoned") {
+      return res.status(400).json({
+        success: false,
+        message: "Override only allowed on rejected or summoned departments",
+      });
+    }
+
+    department.status = "cleared";
+    department.clearedAt = new Date();
+    department.officerReason = "Admin override: " + reason.trim();
+
+    clearance.addDepartmentHistory(departmentIndex, {
+      action: "cleared",
+      actor: req.user.id,
+      actorRole: "admin",
+      reason: "Admin override: " + reason.trim(),
+    });
+
+    await clearance.save();
+
+    const updatedClearance = await populateClearance(
+      Clearance.findById(clearance._id)
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Department cleared by admin",
+      clearance: updatedClearance,
+    });
+  } catch (error) {
+    console.error("adminOverride error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+    });
+  }
+};
+
+const getAdminStats = async (req, res) => {
+  try {
+    const totalStudents = await User.countDocuments({ role: "student" });
+    const clearances = await Clearance.find({});
+
+    const fullyCleared = clearances.filter(
+      (c) => c.overallStatus === "cleared"
+    ).length;
+    const inProgress = clearances.filter(
+      (c) => c.overallStatus === "in_progress"
+    ).length;
+    const pending = clearances.filter(
+      (c) => c.overallStatus === "pending"
+    ).length;
+    const summoned = clearances.filter(
+      (c) => c.overallStatus === "summoned"
+    ).length;
+    const blocked = clearances.filter(
+      (c) => c.overallStatus === "blocked"
+    ).length;
+
+    const totalDeductions = clearances.reduce(
+      (sum, c) => sum + (c.totalDeductions || 0),
+      0
+    );
+
+    const DEPARTMENTS = [
+      "Head of Music",
+      "Head of Drama",
+      "Head of Industrial Liaison (ILO)",
+      "Head of Guidance & Counselling",
+      "Head of Sports (Games items)",
+      "Head of Library",
+      "Housekeeper (Beddings)",
+      "Stores Controller",
+      "Storekeeper (Department)",
+      "Head of Department (HOD)",
+      "Exams Officer (Department)",
+      "Dean of Students (College ID)",
+      "Fees Balance (KShs)",
+      "Registrar (Administration)",
+    ];
+
+    const departmentStats = DEPARTMENTS.map((name, index) => {
+      const sno = index + 1;
+      let cleared = 0;
+      let pendingCount = 0;
+      let requested = 0;
+      let rejected = 0;
+      let summonedCount = 0;
+
+      clearances.forEach((c) => {
+        const dept = c.departments.find((d) => d.sno === sno);
+        if (dept) {
+          switch (dept.status) {
+            case "cleared":
+              cleared++;
+              break;
+            case "pending":
+              pendingCount++;
+              break;
+            case "requested":
+              requested++;
+              break;
+            case "rejected":
+              rejected++;
+              break;
+            case "summoned":
+              summonedCount++;
+              break;
+          }
+        }
+      });
+
+      const completionRate =
+        totalStudents > 0
+          ? Number(((cleared / totalStudents) * 100).toFixed(2))
+          : 0;
+
+      return {
+        sno,
+        name,
+        cleared,
+        pending: pendingCount,
+        requested,
+        rejected,
+        summoned: summonedCount,
+        completionRate,
+      };
+    });
+
+    return res.status(200).json({
+      totalStudents,
+      fullyCleared,
+      inProgress,
+      pending,
+      summoned,
+      blocked,
+      totalDeductions,
+      departmentStats,
+    });
+  } catch (error) {
+    console.error("getAdminStats error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error.",
+    });
+  }
+};
+
+/**
+ * ==================================================
  * Exports
  * ==================================================
  */
@@ -552,4 +740,7 @@ module.exports = {
   getClearanceById,
   getAllClearances,
   getOfficerHistory,
+  adminOverride,
+  getAdminStats,
 };
+

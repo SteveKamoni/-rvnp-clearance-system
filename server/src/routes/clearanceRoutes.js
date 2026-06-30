@@ -13,6 +13,8 @@ const {
   getClearanceById,
   getAllClearances,
   getOfficerHistory,
+  adminOverride,
+  getAdminStats,
 } = require("../controllers/clearanceController");
 
 const router = express.Router();
@@ -67,6 +69,17 @@ router.patch(
 
 // GET /api/clearance/all
 router.get("/all", authenticate, authorize("admin"), getAllClearances);
+
+// GET /api/clearance/admin/stats
+router.get("/admin/stats", authenticate, authorize("admin"), getAdminStats);
+
+// PATCH /api/clearance/admin/override/:studentId/department/:sno
+router.patch(
+  "/admin/override/:studentId/department/:sno",
+  authenticate,
+  authorize("admin"),
+  adminOverride,
+);
 
 /**
  * ==================================================
